@@ -1,1 +1,5 @@
 *.exe
+*.cmd
+*.txt
+lections/
+out/
