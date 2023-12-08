@@ -80,7 +80,9 @@ double integrate_parallel_winapi(double begin, double end, double h, double (*fu
 	for (int i = 0; i < numThreads; ++i) {
 		total += params[i].result;
 		// Высвобождаются ресурсы
-		CloseHandle(&threads[i]);
+		if (threads[i]) {
+			CloseHandle(threads[i]);
+		}
 	}
 
 	return total;
