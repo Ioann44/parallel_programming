@@ -76,39 +76,42 @@ vector<double> jacoby_omp(vector<vector<double>> &a, vector<double> &b, double t
 vector<double> jacoby_winapi(vector<vector<double>> &a, vector<double> &b, double tolerance) {
 	int n = a.size();
 	vector<double> x_k(n), x_k1(n);
-	HANDLE *threads = new HANDLE[n];
+	int threads_num = 8;
+	int chunk_size = (n + threads_num - 1) / threads_num; // Если не разбивать на чанки, то будет замедление в 10-12 раз
+	HANDLE *threads = new HANDLE[threads_num];
 
 	// Да! Действительно можно записать tuple вместо struct!!!
-	typedef std::tuple<int, vector<vector<double>> *, vector<double> *, vector<double> *, double, double *> winapi_parameter;
+	typedef std::tuple<int, int, vector<vector<double>> *, vector<double> *, vector<double> *, double, vector<double> *> winapi_parameter;
 	// Здесь решил не выносить функцию потока, а записать её как лямбда-функцию
 	auto lambda_fun = [](LPVOID param) -> DWORD {
 		auto data = reinterpret_cast<winapi_parameter *>(param);
 
 		// C++ 20 on it's best
-		auto &[idx, a_ref, b_ref, x_k_ref, tol, res] = *data;
+		auto &[start, end, a_ref, b_ref, x_k_ref, tol, x_k1_ref] = *data;
 
-		double sum = b_ref->at(idx);
-		for (size_t j = 0; j < a_ref->size(); j++) {
-			if (idx != j) {
-				sum -= x_k_ref->at(j) * a_ref->at(idx)[j];
+		for (int i = start; i < end; i++) {
+			double sum = b_ref->at(i);
+			for (size_t j = 0; j < a_ref->size(); j++) {
+				if (i != j) {
+					sum -= x_k_ref->at(j) * a_ref->at(i)[j];
+				}
 			}
+			x_k1_ref->at(i) = sum / a_ref->at(i)[i];
 		}
-		*res = sum / a_ref->at(idx)[idx];
 
 		return 0;
 		};
 
 	do {
-		for (int i = 0; i < n; i++) {
-			threads[i] = CreateThread(NULL, 0, lambda_fun, new winapi_parameter(i, &a, &b, &x_k, tolerance, &x_k1[i]), 0, NULL);
+		for (int i = 0; i < threads_num; i++) {
+			threads[i] = CreateThread(NULL, 0, lambda_fun, new winapi_parameter(i * chunk_size, min(i * chunk_size + chunk_size, n), &a, &b, &x_k, tolerance, &x_k1), 0, NULL);
 		}
 
-		WaitForMultipleObjects(n, threads, TRUE, INFINITE);
+		WaitForMultipleObjects(threads_num, threads, TRUE, INFINITE);
 		swap(x_k, x_k1);
-
 	} while (get_diff(x_k, x_k1) > tolerance);
 
-	for (int i = 0; i < n; i++) {
+	for (int i = 0; i < threads_num; i++) {
 		if (threads[i]) {
 			CloseHandle(threads[i]);
 		}
@@ -142,12 +145,12 @@ int main() {
 		}
 	}
 
-	/*vector<vector<double>> a{
-	   {4, -1, 0},
-	   {-1, 4, -1},
-	   {0, -1, 3},
-	};
-	vector<double> b{5, -7, 6};*/
+	//vector<vector<double>> a{
+	//   {4, -1, 0},
+	//   {-1, 4, -1},
+	//   {0, -1, 3},
+	//};
+	//vector<double> b{5, -7, 6};
 
 	auto start_time = std::chrono::high_resolution_clock::now();
 	auto serial_result = jacoby_serial(a, b, tolerance);
@@ -161,6 +164,7 @@ int main() {
 
 	start_time = std::chrono::high_resolution_clock::now();
 	auto winapi_result = jacoby_winapi(a, b, tolerance);
+	//auto winapi_result = 1;
 	end_time = std::chrono::high_resolution_clock::now();
 	auto winapi_duration = end_time - start_time;
 
