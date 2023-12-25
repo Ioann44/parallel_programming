@@ -10,6 +10,8 @@
 #include <thread>
 #include <vector>
 
+#define THREADS_NUM 8
+
 using std::cin, std::cout, std::vector;
 
 template <typename T>
@@ -55,6 +57,8 @@ vector<double> jacoby_serial(vector<vector<double>> &a, vector<double> &b, doubl
 vector<double> jacoby_omp(vector<vector<double>> &a, vector<double> &b, double tolerance) {
 	int n = a.size();
 	vector<double> x_k(n), x_k1(n);
+	omp_set_dynamic(0);
+	omp_set_num_threads(THREADS_NUM);
 	do {
 #pragma omp parallel for
 		for (int i = 0; i < n; i++) {
@@ -76,7 +80,7 @@ vector<double> jacoby_omp(vector<vector<double>> &a, vector<double> &b, double t
 vector<double> jacoby_winapi(vector<vector<double>> &a, vector<double> &b, double tolerance) {
 	int n = a.size();
 	vector<double> x_k(n), x_k1(n);
-	int threads_num = 8;
+	int threads_num = THREADS_NUM;
 	int chunk_size = (n + threads_num - 1) / threads_num; // Если не разбивать на чанки, то будет замедление в 10-12 раз
 	HANDLE *threads = new HANDLE[threads_num];
 
@@ -123,61 +127,68 @@ vector<double> jacoby_winapi(vector<vector<double>> &a, vector<double> &b, doubl
 
 int main() {
 	setlocale(LC_ALL, "Russian");
-	int n = 1e4;
-	double tolerance = 1e-4;
-
 	std::random_device rd;
 	std::mt19937 gen(rd());
 	std::uniform_real_distribution<double> dis(-100, 100);
+	cout << "Размерность\tПоследовательное (мс)\t   OpenMP (мс)\t   WinAPI (мс)\n";
 
-	vector a(n, vector<double>(n));
-	vector b(n, 0.);
-	for (int i = 0; i < n; i++) {
-		b[i] = dis(gen);
-		for (int j = 0; j < n; j++) {
-			a[i][j] = dis(gen);
-			while (i == j && abs(a[i][j]) < 10) {
+	for (int n : vector{50, 100, 250, 500, 1000, 10000}) {
+		double tolerance = 1e-4;
+
+
+		vector a(n, vector<double>(n));
+		vector b(n, 0.);
+		for (int i = 0; i < n; i++) {
+			b[i] = dis(gen);
+			for (int j = 0; j < n; j++) {
 				a[i][j] = dis(gen);
-			}
-			if (i == j) {
-				a[i][j] *= n;
+				while (i == j && abs(a[i][j]) < 10) {
+					a[i][j] = dis(gen);
+				}
+				if (i == j) {
+					a[i][j] *= n;
+				}
 			}
 		}
+
+		//vector<vector<double>> a{
+		//   {4, -1, 0},
+		//   {-1, 4, -1},
+		//   {0, -1, 3},
+		//};
+		//vector<double> b{5, -7, 6};
+
+		auto start_time = std::chrono::high_resolution_clock::now();
+		auto serial_result = jacoby_serial(a, b, tolerance);
+		auto end_time = std::chrono::high_resolution_clock::now();
+		auto serial_duration = end_time - start_time;
+
+		start_time = std::chrono::high_resolution_clock::now();
+		auto omp_result = jacoby_omp(a, b, tolerance);
+		end_time = std::chrono::high_resolution_clock::now();
+		auto omp_duration = end_time - start_time;
+
+		start_time = std::chrono::high_resolution_clock::now();
+		auto winapi_result = jacoby_winapi(a, b, tolerance);
+		//auto winapi_result = 1;
+		end_time = std::chrono::high_resolution_clock::now();
+		auto winapi_duration = end_time - start_time;
+
+		//cout << "Последовательное вычисление:\nРезультат: " << serial_result
+		//	<< "\nВремя: " << serial_duration.count() / 1e6 << " мс\n";
+		//cout << std::endl;
+		//cout << "Параллельное (openmp) вычисление:\nРезультат: " << omp_result
+		//	<< "\nВремя: " << omp_duration.count() / 1e6 << " мс\n";
+		//cout << std::endl;
+		//cout << "Параллельное (winapi) вычисление:\nРезультат: " << winapi_result
+		//	<< "\nВремя: " << winapi_duration.count() / 1e6 << " мс\n";
+		//cout << std::endl;
+		//cout << "Выигрыш (openmp) в " << (double)serial_duration.count() / omp_duration.count() << " раз" << std::endl;
+		//cout << "Выигрыш (winapi) в " << (double)serial_duration.count() / winapi_duration.count() << " раз" << std::endl;
+
+		cout << std::setw(11) << n << '\t'
+			<< std::setw(21) << serial_duration.count() / 1e6 << '\t'
+			<< std::setw(14) << omp_duration.count() / 1e6 << '\t'
+			<< std::setw(14) << winapi_duration.count() / 1e6 << std::endl;
 	}
-
-	//vector<vector<double>> a{
-	//   {4, -1, 0},
-	//   {-1, 4, -1},
-	//   {0, -1, 3},
-	//};
-	//vector<double> b{5, -7, 6};
-
-	auto start_time = std::chrono::high_resolution_clock::now();
-	auto serial_result = jacoby_serial(a, b, tolerance);
-	auto end_time = std::chrono::high_resolution_clock::now();
-	auto serial_duration = end_time - start_time;
-
-	start_time = std::chrono::high_resolution_clock::now();
-	auto omp_result = jacoby_omp(a, b, tolerance);
-	end_time = std::chrono::high_resolution_clock::now();
-	auto omp_duration = end_time - start_time;
-
-	start_time = std::chrono::high_resolution_clock::now();
-	auto winapi_result = jacoby_winapi(a, b, tolerance);
-	//auto winapi_result = 1;
-	end_time = std::chrono::high_resolution_clock::now();
-	auto winapi_duration = end_time - start_time;
-
-	cout << "Последовательное вычисление:\nРезультат: " << serial_result
-		<< "\nВремя: " << serial_duration.count() / 1e6 << " мс\n";
-	cout << std::endl;
-	cout << "Параллельное (openmp) вычисление:\nРезультат: " << omp_result
-		<< "\nВремя: " << omp_duration.count() / 1e6 << " мс\n";
-	cout << std::endl;
-	cout << "Параллельное (winapi) вычисление:\nРезультат: " << winapi_result
-		<< "\nВремя: " << winapi_duration.count() / 1e6 << " мс\n";
-	cout << std::endl;
-	cout << "Выигрыш (openmp) в " << (double)serial_duration.count() / omp_duration.count() << " раз" << std::endl;
-	cout << "Выигрыш (winapi) в " << (double)serial_duration.count() / winapi_duration.count() << " раз" << std::endl;
-	// std::system("pause");
 }
